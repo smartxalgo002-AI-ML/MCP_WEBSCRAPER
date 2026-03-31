@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Market News Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 AI Market News Dashboard</h1>
+
+        <!-- START BUTTON -->
+        <button onclick="startScraping()" id="scrapeBtn">🚀 Start Scraping</button>
+
+        <!-- SEARCH BAR -->
+        <div style="display:flex; justify-content:flex-end; margin:15px;">
+            <input
+                type="text"
+                id="searchBox"
+                placeholder="Search news..."
+                onkeyup="searchNews()"
+                style="
+                    width: 300px;
+                    padding: 10px 15px;
+                    border-radius: 20px;
+                    border: 1px solid #ccc;
+                    outline: none;
+                    font-size: 14px;
+                    background: rgba(255,255,255,0.1);
+                    color: white;
+                "
+            >
+        </div>
+
+        <!-- SOURCE FILTER BUTTONS -->
+        <div class="filters">
+            <button onclick="filterSource('ALL'); setActiveButton(this)" class="active">All</button>
+            <button onclick="filterSource('Moneycontrol'); setActiveButton(this)">Moneycontrol</button>
+            <button onclick="filterSource('EconomicTimes'); setActiveButton(this)">Economic Times</button>
+            <button onclick="filterSource('Reuters'); setActiveButton(this)">Reuters</button>
+            <button onclick="filterSource('Bloomberg'); setActiveButton(this)">Bloomberg</button>
+            <button onclick="filterSource('AlJazeera'); setActiveButton(this)">Al Jazeera</button>
+            <button onclick="filterSource('NYTimes'); setActiveButton(this)">NY Times</button>
+            <button onclick="filterSource('Reddit'); setActiveButton(this)">Reddit</button>
+            <button onclick="filterSource('Twitter'); setActiveButton(this)">Twitter</button>
+            <button onclick="filterSource('CNBC'); setActiveButton(this)">CNBC</button>
+        </div>
+
+        <!-- LOADER -->
+        <div id="loader" class="hidden">⏳ Fetching news...</div>
+
+        <!-- NEWS -->
+        <div id="newsContainer"></div>
+    </div>
+
+    <!-- LIVE NEWS TICKER -->
+    <div id="liveTicker">
+        <div id="tickerContent">🚀 Waiting for live news...</div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
