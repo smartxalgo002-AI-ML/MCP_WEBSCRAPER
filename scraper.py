@@ -353,8 +353,8 @@ async def _twscrape_fetch_async(accounts, limit_per_account=3):
                     if not text or link in seen_news:
                         continue
                     items.append(build_news_item(
-                        f"Twitter @{username}",
-                        text[:150],
+                        "Twitter",
+                        f"@{username}: {text[:120]}",
                         link,
                         text,
                         str(tw.date) if tw.date else ""
@@ -412,7 +412,7 @@ def _fetch_twitter_via_googlenews(limit=30):
                 if not title or not link or link in seen_news:
                     continue
                 news_list.append(build_news_item(
-                    "Twitter/News",
+                    "Twitter",
                     title, link,
                     entry.get("summary", ""),
                     entry.get("published", "")
