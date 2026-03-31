@@ -396,35 +396,169 @@ def _fetch_twitter_via_twscrape(limit_per_account=3):
             return future.result(timeout=120)
 
 
-def _fetch_twitter_via_googlenews(limit=30):
+# =========================
+# TWITTER GUEST TOKEN (no login needed — uses Twitter's own public bearer)
+# =========================
+_TW_BEARER = (
+    "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
+    "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCbke80A1X8Yb0"
+)
+_guest_token_cache = {"token": None, "ts": 0}
+
+def _get_guest_token():
+    """Fetch a Twitter guest token (refreshed every 15 min)."""
+    now = time.time()
+    if _guest_token_cache["token"] and now - _guest_token_cache["ts"] < 900:
+        return _guest_token_cache["token"]
+    try:
+        res = requests.post(
+            "https://api.twitter.com/1.1/guest/activate.json",
+            headers={"Authorization": f"Bearer {_TW_BEARER}"},
+            timeout=10
+        )
+        if res.status_code == 200:
+            token = res.json().get("guest_token")
+            _guest_token_cache["token"] = token
+            _guest_token_cache["ts"] = now
+            return token
+    except Exception as e:
+        print(f"Guest token error: {e}")
+    return None
+
+
+def _fetch_user_tweets_guest(username, guest_token, count=3):
     """
-    Google News RSS fallback — topical queries that surface tweets and
-    statements from the same official accounts when twscrape is unavailable
-    or not yet configured.
+    Fetch recent tweets via Twitter's internal v1.1 API using guest token.
+    Returns list of (text, tweet_url) tuples. No login required.
+    """
+    try:
+        headers = {
+            "Authorization": f"Bearer {_TW_BEARER}",
+            "x-guest-token": guest_token,
+            "User-Agent": "Mozilla/5.0",
+        }
+        res = requests.get(
+            "https://api.twitter.com/1.1/statuses/user_timeline.json",
+            params={
+                "screen_name": username,
+                "count": count,
+                "tweet_mode": "extended",
+                "exclude_replies": True,
+                "include_rts": False,
+            },
+            headers=headers,
+            timeout=10
+        )
+        if res.status_code != 200:
+            return []
+        tweets = res.json()
+        result = []
+        for tw in tweets:
+            text = tw.get("full_text") or tw.get("text", "")
+            tid  = tw.get("id_str", "")
+            if text and tid:
+                result.append((text, f"https://x.com/{username}/status/{tid}"))
+        return result
+    except Exception as e:
+        print(f"Guest fetch @{username}: {e}")
+        return []
+
+
+def _fetch_twitter_via_guest_token(accounts, limit_per_account=3):
+    """
+    Fetch real tweets using Twitter guest token — no credentials needed.
+    Returns actual x.com/username/status/id links.
+    """
+    guest_token = _get_guest_token()
+    if not guest_token:
+        print("Twitter: could not get guest token")
+        return []
+
+    news_list = []
+    for username in accounts:
+        tweets = _fetch_user_tweets_guest(username, guest_token, limit_per_account)
+        for text, link in tweets:
+            if link in seen_news:
+                continue
+            news_list.append(build_news_item(
+                "Twitter",
+                f"@{username}: {text[:120]}",
+                link,
+                text,
+                ""
+            ))
+            seen_news.add(link)
+        time.sleep(0.3)   # gentle rate-limit pause
+
+    print(f"Twitter (guest token): {len(news_list)} tweets")
+    return news_list
+
+
+# =========================
+# TWITTER SEARCH URL FALLBACK
+# (absolute last resort — opens real Twitter search, not Google News)
+# =========================
+TWITTER_SEARCH_GROUPS = [
+    {
+        "title": "Indian Regulators: RBI, SEBI, NSE, BSE, FinMin — Live Tweets",
+        "summary": "Live tweets from RBI, SEBI_updates, NSEIndia, BSEIndia, FinMinIndia, DasShaktikanta",
+        "accounts": ["RBI", "SEBI_updates", "NSEIndia", "BSEIndia", "FinMinIndia", "DasShaktikanta"],
+    },
+    {
+        "title": "Indian Government: PMO, Modi, Nirmala Sitharaman — Live Tweets",
+        "summary": "Live tweets from PMOIndia, narendramodi, nsitharaman, NITI_Aayog, pib_india",
+        "accounts": ["PMOIndia", "narendramodi", "nsitharaman", "NITI_Aayog", "pib_india"],
+    },
+    {
+        "title": "Indian Market Experts — Live Tweets",
+        "summary": "Live tweets from NithinKamath, RadhikaGupta29, deepakshenoy, Ajay_Bagga, TamalBandyo",
+        "accounts": ["NithinKamath", "Nithin0dha", "RadhikaGupta29", "deepakshenoy", "Ajay_Bagga", "TamalBandyo"],
+    },
+    {
+        "title": "US Markets: Fed, Trump, Treasury, SEC — Live Tweets",
+        "summary": "Live tweets from federalreserve, realDonaldTrump, USTreasury, SecScottBessent, SEC_News",
+        "accounts": ["federalreserve", "realDonaldTrump", "USTreasury", "SecScottBessent", "SEC_News", "POTUS"],
+    },
+    {
+        "title": "Global Markets: Goldman, BlackRock, NYSE, Nasdaq — Live Tweets",
+        "summary": "Live tweets from GoldmanSachs, MorganStanley, BlackRock, NYSE, Nasdaq, CMEGroup",
+        "accounts": ["GoldmanSachs", "MorganStanley", "BlackRock", "NYSE", "Nasdaq", "CMEGroup"],
+    },
+    {
+        "title": "Russia Economy: Kremlin, Central Bank, MFA — Live Tweets",
+        "summary": "Live tweets from KremlinRussia_E, CentralBankRF, tass_agency, mfa_russia_en",
+        "accounts": ["KremlinRussia_E", "CentralBankRF", "tass_agency", "mfa_russia_en", "RF_EnergyMin"],
+    },
+    {
+        "title": "Indian Business Leaders — Live Tweets",
+        "summary": "Live tweets from anandmahindra, RNTata2000, NandanNilekani, udaykotak, HarshGoenka",
+        "accounts": ["anandmahindra", "RNTata2000", "NandanNilekani", "udaykotak", "HarshGoenka"],
+    },
+]
+
+def _fetch_twitter_search_fallback():
+    """
+    Last resort: generate cards that open REAL Twitter search pages
+    (x.com/search?q=from:RBI+OR+from:SEBI...) — NOT Google News.
+    User clicks 'Read Full' and sees live tweets directly on Twitter/X.
     """
     news_list = []
-    for rss_url in TWITTER_FALLBACK_RSS:
-        try:
-            feed = feedparser.parse(rss_url)
-            for entry in feed.entries:
-                link  = entry.get("link", "")
-                title = entry.get("title", "")
-                if not title or not link or link in seen_news:
-                    continue
-                news_list.append(build_news_item(
-                    "Twitter",
-                    title, link,
-                    entry.get("summary", ""),
-                    entry.get("published", "")
-                ))
-                seen_news.add(link)
-                if len(news_list) >= limit:
-                    break
-        except Exception as e:
-            print(f"Twitter Google-News fallback error: {e}")
-        if len(news_list) >= limit:
-            break
-    print(f"Twitter (Google News fallback): {len(news_list)} items")
+    for group in TWITTER_SEARCH_GROUPS:
+        accounts = group["accounts"]
+        query    = "+OR+".join([f"from%3A{a}" for a in accounts])
+        link     = f"https://x.com/search?q={query}&src=typed_query&f=live"
+        if link in seen_news:
+            continue
+        news_list.append(build_news_item(
+            "Twitter",
+            group["title"],
+            link,
+            group["summary"] + " — Click 'Read Full' to view live tweets on Twitter/X",
+            ""
+        ))
+        seen_news.add(link)
+
+    print(f"Twitter (search URL fallback): {len(news_list)} groups")
     return news_list
 
 
@@ -433,29 +567,35 @@ def fetch_twitter_news(accounts=None, limit_per_account=3):
     Main entry-point for Twitter data.
 
     Priority order:
-      1. twscrape  — set TW_USERNAME / TW_PASSWORD / TW_EMAIL env vars to enable.
-         Monitors ALL accounts in ALL_TWITTER_ACCOUNTS (high + medium priority).
-      2. Google News RSS fallback — topical queries covering the same subjects.
+      1. twscrape      — set TW_USERNAME / TW_PASSWORD / TW_EMAIL env vars.
+                         Fetches real tweet content + real x.com links.
+      2. Guest token   — no credentials needed, uses Twitter's public bearer.
+                         Fetches real tweet content + real x.com links.
+      3. Search URLs   — no credentials needed, opens real Twitter search page.
+                         'Read Full' opens x.com with live tweets, NOT Google News.
     """
-    # ── 1. twscrape (real Twitter timelines) ────────────────────────────────
-    if TWSCRAPE_AVAILABLE:
-        if TW_USERNAME and TW_PASSWORD:
-            try:
-                result = _fetch_twitter_via_twscrape(limit_per_account)
-                if result:
-                    return result
-                print("twscrape returned 0 tweets — falling back to Google News RSS")
-            except Exception as e:
-                print(f"twscrape failed, falling back: {e}")
-        else:
-            print(
-                "Twitter: twscrape installed but NO credentials found.\n"
-                "  Set TW_USERNAME, TW_PASSWORD, TW_EMAIL env vars to enable real-time\n"
-                "  official account monitoring.  Using Google News fallback for now."
-            )
+    # ── 1. twscrape (real timelines, needs credentials) ─────────────────────
+    if TWSCRAPE_AVAILABLE and TW_USERNAME and TW_PASSWORD:
+        try:
+            result = _fetch_twitter_via_twscrape(limit_per_account)
+            if result:
+                return result
+            print("twscrape returned 0 tweets — trying guest token")
+        except Exception as e:
+            print(f"twscrape failed: {e} — trying guest token")
 
-    # ── 2. Google News RSS fallback ─────────────────────────────────────────
-    return _fetch_twitter_via_googlenews(limit=30)
+    # ── 2. Guest token (real tweets, no credentials needed) ──────────────────
+    try:
+        accs   = accounts if accounts else ALL_TWITTER_ACCOUNTS
+        result = _fetch_twitter_via_guest_token(accs, limit_per_account)
+        if result:
+            return result
+        print("Guest token returned 0 tweets — using search URL fallback")
+    except Exception as e:
+        print(f"Guest token failed: {e} — using search URL fallback")
+
+    # ── 3. Twitter search URL cards (always works, opens real Twitter) ───────
+    return _fetch_twitter_search_fallback()
 
 
 # =========================
